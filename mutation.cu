@@ -16,7 +16,7 @@
 
 __global__ void mutate(int *genome,int lengh,curandState *state)
 {
-  size_t ixy = blockIdx.x*blockDim.x+threadIdx.x;
+  int ixy = blockIdx.x*blockDim.x+threadIdx.x;
 
   //printf("gpu %d and %d \n", ixy, genome[ixy]);
 
@@ -25,26 +25,38 @@ __global__ void mutate(int *genome,int lengh,curandState *state)
 
   int muttype= (int) (curand_uniform(&state[ixy+2])*(3))+1;
 
+
   //float test=curand_uniform(&state[ixy]+ixy)*(lengh);
 
-  genome[mutpose]=(genome[mutpose]+muttype)%4;
+  genome[mutpose+(blockIdx.x*lengh)]=(genome[mutpose+(blockIdx.x*lengh)]+muttype)%4;
 
-  printf("gpu %d\n", mutpose);
+  //printf("gpu %d\n", mutpose);
   //printf("gpu %f\n", test);
 }
 
 __global__ void grand(curandState *state,unsigned long seed)
 {
-    size_t ixy = blockIdx.x*blockDim.x+threadIdx.x;
+    int ixy = blockIdx.x*blockDim.x+threadIdx.x;
 
     curand_init(seed,(ixy),0,&state[ixy+2]);
 }
 
-
-__global__ void calculateEntropy(int *genome,int posi, int types, int len, double *entropy)
+__global__ void alcate(int *genome,int lengh)
 {
-    size_t ixy = blockIdx.x*blockDim.x+threadIdx.x;
+    int ixy = blockIdx.x*(blockDim.x)+threadIdx.x+1;
 
+    genome[ixy]=genome[blockIdx.x];
+
+
+   //printf("a %d %d\n",blockIdx.x,  genome[2]);
+
+}
+
+
+__global__ void calculateEntropy(int *genome,int posi, int types, int len, int *entropy)
+{
+    int ixy = blockIdx.x*blockDim.x+threadIdx.x;
+    extern __shared__ int temp[];
     int total=0;
     int multi;
     for(int j=ixy;j<ixy+len;j++)
@@ -57,28 +69,47 @@ __global__ void calculateEntropy(int *genome,int posi, int types, int len, doubl
       total=total+(genome[j]*multi); //entropy state numbers
 
     }
-    entropy[total]++;
+    //printf("%d \n",blockDim.x);
+    __syncthreads();
+    temp[total+(blockIdx.x*posi)]=temp[total+(blockIdx.x*posi)]+1; //MMMMMMEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEHHHHHHHHHH
+    __syncthreads();
+    entropy[total+(blockIdx.x*posi)]=temp[total+(blockIdx.x*posi)];
+    printf("total %d %d %d \n",genome[ixy], entropy[total+(blockIdx.x*posi)], total+(blockIdx.x*posi));
 }
-
-double calculateEntropy( int posi ,int* entab) // possibilities and array for entropy
+__device__ double calculateEntropy2( int posi ,int* entab,int set) // possibilities and array for entropy
 {
   double sum=0;
+  int mv=set*posi;
   for(int i =0;i<posi;i++)
   {
-    sum=sum+entab[i];
+    sum=sum+entab[i+mv];
   }
+
   double entropy=0;
   for(int i =0;i<posi;i++)
   {
-    //cout<<entropy;
-    if((double)entab[i]/sum)
+    printf("ent %d \n",entab[i+mv]);
+
+    if((double)entab[i+mv]/sum>0)
     {
-      entropy=entropy+(((double)entab[i]/sum)*(double)TMath::Log2((double)entab[i]/sum));
+      entropy=entropy+(((double)entab[i+mv]/sum)*(double)log2((double)entab[i+mv]/sum));
     }
 
   }
   return -entropy;
 }
+
+__global__ void calculateEntropy3(int posi, int *entropy, double*out)
+{
+    int ixy = blockIdx.x*blockDim.x+threadIdx.x;
+
+    printf("%d %d\n",entropy[ixy],ixy);
+    out[ixy]=calculateEntropy2(posi,entropy,ixy);
+    //printf("entr %d %lf \n", ixy ,out[ixy]);
+
+}
+
+
 
 
 int main()
@@ -87,10 +118,12 @@ int main()
   int lengh;
   int day;
   int *genome;
+  cudaError_t err;
 
 
   //chengables
   int createmut=5; //how many mutations to create
+  int nchain=3; //how many genoms to mutate
   int len=1; //leng of chcked chain
   int types=4; //number of type variables
   //~chengables
@@ -112,7 +145,7 @@ int main()
   fscanf (ifile, "%d", &mutationnum);
   fscanf (ifile, "%d", &day);
   fscanf (ifile, "%d", &lengh);
-
+  lengh=5;
 
   genome=(int*)malloc(lengh*sizeof(int));
 
@@ -122,34 +155,61 @@ int main()
       fscanf (ifile, "%d", &genome[i]);
     }
 
-    cudaSetDevice(0);
 
 
-    int *gpm;
-    cudaMalloc(&gpm,  lengh*sizeof(int));
-    cudaMemcpy(gpm,genome,lengh*sizeof(int),cudaMemcpyHostToDevice);
+    //cudaSetDevice(0);
 
-    double *entropy;
-    double enbuffer[posi];
+
+
+
+    double *outentropy;
+    int *entropytab;
+    double enbuffer[posi][nchain];
     for(int i=0;i<posi;i++)
     {
-      enbuffer[i]=0;
+      for(int j=0;j<nchain;j++)
+      {
+        enbuffer[i][j]=0;
+      }
     }
-    cudaMalloc(&entropy,  posi*sizeof(double));
-    cudaMemcpy(entropy,enbuffer,posi*sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc(&entropytab, nchain*posi*sizeof(int));
+    cudaMalloc(&outentropy, nchain*sizeof(double));
+    cudaMemcpy(enbuffer,entropytab,nchain*posi*sizeof(int),cudaMemcpyHostToDevice);
+
+    int *gpm;
+    cudaMalloc(&gpm,nchain*lengh*sizeof(int));
+    err=cudaMemcpy(gpm,genome,lengh*sizeof(int),cudaMemcpyHostToDevice);
+
+    if(err == cudaErrorInvalidValue)
+        printf("1!\n");
+    else if(err == cudaErrorInvalidDevicePointer)
+        printf("2!\n");
+    else if(err == cudaErrorInvalidMemcpyDirection)
+        printf("3!\n");
 
     cudaMalloc((void **)&state,(createmut+2)*sizeof(curandState));
-
-    grand<<< createmut, 1 >>>(state,unsigned(time(NULL)));
     cudaDeviceSynchronize();
-    mutate<<< createmut, 1 >>>(gpm,lengh,state);
+    alcate<<< lengh, nchain-1 >>>(gpm,lengh);
     cudaDeviceSynchronize();
-    calculateEntropy<<< lengh+1-len, 1 >>>(gpm,posi,types,len,entropy);
+    grand<<< createmut, nchain >>>(state,unsigned(time(NULL)));
+    cudaDeviceSynchronize();
+    mutate<<< createmut, nchain >>>(gpm,lengh,state);
+    cudaDeviceSynchronize();
+    calculateEntropy<<<  nchain, lengh+1-len,posi*nchain*sizeof(int) >>>(gpm,posi,types,len,entropytab);
+    cudaDeviceSynchronize();
+    calculateEntropy3<<< 1, nchain >>>(posi,entropytab,outentropy);
     cudaDeviceSynchronize();
 
-    cudaMemcpy(genome,gpm,lengh*sizeof(int),cudaMemcpyDeviceToHost);
-    cudaMemcpy(enbuffer,entropy,posi*sizeof(double),cudaMemcpyDeviceToHost);
+    //cudaMemcpy(genome,gpm,lengh*sizeof(int),cudaMemcpyDeviceToHost);
+    //cudaMemcpy(enbuffer,entropy,posi*sizeof(double),cudaMemcpyDeviceToHost);
 
+    double outentropy2[nchain];
+
+    cudaMemcpy(outentropy2,outentropy,nchain*sizeof(double),cudaMemcpyDeviceToHost);
+    for(int i=0;i<nchain;i++)
+    {
+      printf("entr %lf\n", outentropy2[i]);
+    }
 
 
 
