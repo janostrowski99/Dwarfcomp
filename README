@@ -1,0 +1,26 @@
+Celem programu jest badanie zachowania entropii Vopsona w przypadku losowych mutacji.
+
+Program przyjmuje 3 argumenty: ilość mutacji na genom, ilość genomów oraz długość okna entropii.
+
+Chemat działania:
+1. Pobranie genomu z pliku.
+2. Duplikacja genomu w pamięci karty graficznej.
+3. Wygenerowanie generatorów losowych dla każdego genomu.
+4. Przepowadzenie mutacji.
+5. Zliczenie liczby powtuzeń okienek entropii.
+6. Wyliczenie entropii.
+
+Ze względu na ograniczenia w wymiarach bloków Cuda stworzono 2 pary fnkcji w zależności od wielości danych wejściowych. konieczność wykonania jeszcze jednej.
+
+Obecnym problemem programu jest kontrola i uzytkowane pamięci na karcie graficznej. Powyżej pewnej funkcji danych wejściowych program zwraca niepoprawne wartości bez sygnalzowania błędu.
+Jest to jednak widoczne ponieważ są to wartości niefizyczne.
+
+Skalowanie. Program jest obecnie przeoptymalizowany i niezależnie od danych wejściowych (w sęsownym zakresie oraz możliych do przerobienia przy obecnej implementacji) wykonuje się w poniżej 1s.
+Skalować poza zakres danych można poprzez wielokrotne wykonywanie programu.
+
+
+Uruchomienie:
+
+module load cuda/9.0
+nvcc -arch sm_50 -O3 mutation.cu -o mutation -lcuda -lcufft
+./mutation 1 2 3
