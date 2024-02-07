@@ -12,6 +12,7 @@ nvcc -arch sm_50 -O3 mutation.cu -o mutation -lcuda -lcufft
 #include <cuda_runtime_api.h>
 #include <curand.h>
 #include <curand_kernel.h>
+#include <time.h>
 
 
 __global__ void mutate(int *genome,int lengh,curandState *state)
@@ -201,7 +202,9 @@ int main(int argc, char* argv[])
   int *genome;
   cudaError_t err;
 
+  time_t time1, time2,time3,time4,time5;
 
+  time(&time1);
   //chengables
   int createmut=5; //how many mutations to create
   int nchain=4; //how many genoms to mutate
@@ -242,7 +245,7 @@ int main(int argc, char* argv[])
     //printf("%d %d\n",i, genome[i]);
   }
 
-
+time(&time2);
 
   //cudaSetDevice(0);
 
@@ -286,14 +289,14 @@ int main(int argc, char* argv[])
     alcateBig<<<  nchain-1,1000 >>>(gpm,lengh);
   }
 
-
+  time(&time3);
   cudaDeviceSynchronize();
   grand<<< createmut, nchain >>>(state,unsigned(time(NULL)));
   cudaDeviceSynchronize();
   mutate<<< createmut, nchain >>>(gpm,lengh,state);
   cudaDeviceSynchronize();
 
-
+  time(&time4);
   if(lengh<1024)
   {
     calculateEntropy<<<  nchain, lengh+1-len,posi*nchain*sizeof(int) >>>(gpm,posi,types,len,entropytab);
@@ -317,11 +320,12 @@ int main(int argc, char* argv[])
   cudaMemcpy(outentropy2,outentropy,nchain*sizeof(double),cudaMemcpyDeviceToHost);
   for(int i=0;i<nchain;i++)
   {
-    printf("entr %lf\n", outentropy2[i]);
+    //printf("entr %lf\n", outentropy2[i]);
   }
 
-
-
+time(&time5);
+printf("entr %lf\n", outentropy2[0]);
+printf("%.4f %.4f %.4f %.4f \n", difftime(time2, time1),difftime(time3, time1),difftime(time4, time1),difftime(time5, time1));
 
 
   cudaDeviceSynchronize();
